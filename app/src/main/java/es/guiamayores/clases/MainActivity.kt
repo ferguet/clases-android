@@ -46,9 +46,20 @@ class MainActivity : AppCompatActivity() {
     private var grabando = false
     private var cronometro: Chronometer? = null
 
-    /** Elegir un audio de cualquier app o carpeta del movil. */
+    /**
+     * Elegir un audio de cualquier app o carpeta del movil.
+     *
+     * OpenDocument, no GetContent. Con GetContent, Android ofrecia las
+     * apps de MUSICA como forma de "obtener un audio", y varias de ellas
+     * lo que hacen al tocar un fichero es reproducirlo en vez de
+     * devolverlo. La persona tocaba su grabacion, empezaba a sonar, y no
+     * se adjuntaba nada: parecia que la app estaba rota.
+     *
+     * OpenDocument abre siempre el explorador de archivos del sistema,
+     * que es lo que hace falta: elegir un fichero, no escucharlo.
+     */
     private val elegirAudio = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) transcribirDeFuera(uri) }
 
     private val pedirPermiso = registerForActivityResult(
@@ -137,7 +148,15 @@ class MainActivity : AppCompatActivity() {
         raiz.addView(boton("📂  TRAER UN AUDIO YA GRABADO", "#1D4ED8") {
             guardarServidor()
             try {
-                elegirAudio.launch("audio/*")
+                // Se listan los tipos uno a uno en vez de "audio/*"
+                // porque algunos exploradores esconden ficheros cuyo tipo
+                // no reconocen: un .m4a exportado por otra grabadora
+                // puede quedar en gris si solo se pide el comodin.
+                elegirAudio.launch(arrayOf(
+                    "audio/*", "audio/mpeg", "audio/mp4", "audio/x-m4a",
+                    "audio/wav", "audio/x-wav", "audio/ogg", "audio/opus",
+                    "application/octet-stream"
+                ))
             } catch (e: Exception) {
                 avisar("No se pudo abrir el explorador de archivos")
             }
@@ -252,7 +271,13 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             for (nombre in clases.take(20)) {
-                listaClases.addView(botonPequeno(nombre) {
+                // Que se vea de un vistazo qué es cada cosa: la
+                // transcripción literal o los apuntes ya resumidos.
+                val etiqueta = if (nombre.endsWith("_resumen.txt"))
+                    "📝  " + nombre.removeSuffix("_resumen.txt") + "  (apuntes)"
+                else
+                    "🎙️  " + nombre.removeSuffix(".txt")
+                listaClases.addView(botonPequeno(etiqueta) {
                     lifecycleScope.launch {
                         estado.text = "Cargando…"
                         textoResultado.text = try { servidor.leer(nombre) } catch (e: Exception) { "(error al leer)" }
