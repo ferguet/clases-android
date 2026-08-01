@@ -2,12 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Grabar el audio de la clase. Es el unico permiso delicado de toda
-         esta app, y solo se usa mientras la pantalla de grabar esta abierta:
-         nunca en segundo plano, nunca sin que la persona vea el boton de
-         grabando encendido. -->
+         esta app. SI se usa con la app minimizada -una clase dura horas y
+         nadie deja el movil quieto todo ese rato- pero nunca a escondidas:
+         mientras graba hay un aviso permanente en la barra de
+         notificaciones con el tiempo corriendo, que Android obliga a
+         mostrar y que aqui no se intenta esquivar. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- SEGUIR GRABANDO CON LA APP MINIMIZADA.
+         Android permite trabajar en segundo plano solo con un servicio
+         "en primer plano", que obliga a mostrar un aviso permanente. Me
+         parece la condicion correcta: nada de grabar a escondidas. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Para mandar el audio al servidor de transcripcion. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -34,6 +42,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- El que graba de verdad. Vive fuera de la pantalla para que
+             minimizar la app no corte la clase por la mitad. -->
+        <service
+            android:name=".ServicioGrabacion"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 </manifest>

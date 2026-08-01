@@ -28,7 +28,6 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var ajustes: Ajustes
-    private lateinit var grabadora: Grabadora
     private lateinit var servidor: Servidor
 
     private lateinit var estado: TextView
@@ -69,7 +68,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ajustes = Ajustes(this)
-        grabadora = Grabadora(this)
         servidor = Servidor(ajustes.servidor)
 
         val raiz = LinearLayout(this).apply {
@@ -189,6 +187,32 @@ class MainActivity : AppCompatActivity() {
         cargarLista()
     }
 
+    /**
+     * VOLVER A LA APP Y ENCONTRARLA COMO ESTABA.
+     *
+     * Si la grabacion vive en el servicio, la pantalla puede haberse
+     * cerrado y vuelto a abrir mientras tanto. Sin esto, al volver
+     * apareceria el boton verde de "empezar a grabar" con la clase
+     * grabandose de fondo: dos verdades distintas a la vez, y la de la
+     * pantalla seria la falsa.
+     */
+    override fun onResume() {
+        super.onResume()
+        if (ServicioGrabacion.grabando && !grabando) {
+            grabando = true
+            botonGrabar.text = "⏹️  PARAR Y TRANSCRIBIR"
+            botonGrabar.background = GradientDrawable().apply {
+                setColor(Color.parseColor("#B91C1C")); cornerRadius = 26f
+            }
+            estado.text = "🔴 Grabando… (sigue grabando aunque salga de la app)"
+            estado.setTextColor(Color.parseColor("#F87171"))
+            cronometro?.visibility = android.view.View.VISIBLE
+            cronometro?.base = android.os.SystemClock.elapsedRealtime() -
+                ServicioGrabacion.segundosGrabando() * 1000
+            cronometro?.start()
+        }
+    }
+
     private fun alPulsarGrabar() {
         ajustes.ultimaAsignatura = campoAsignatura.text.toString()
         guardarServidor()
@@ -207,13 +231,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun empezarGrabacion() {
         try {
-            grabadora.empezar()
+            // Lo lanza el SERVICIO, no esta pantalla: asi minimizar la app
+            // no corta la clase por la mitad.
+            ServicioGrabacion.arrancar(this)
             grabando = true
             botonGrabar.text = "⏹️  PARAR Y TRANSCRIBIR"
             botonGrabar.background = GradientDrawable().apply {
                 setColor(Color.parseColor("#B91C1C")); cornerRadius = 26f
             }
-            estado.text = "🔴 Grabando…"
+            estado.text = "🔴 Grabando… (puede minimizar la app y usar el móvil)"
             estado.setTextColor(Color.parseColor("#F87171"))
             cronometro?.visibility = android.view.View.VISIBLE
             cronometro?.base = android.os.SystemClock.elapsedRealtime()
@@ -226,31 +252,46 @@ class MainActivity : AppCompatActivity() {
     private fun pararYTranscribir() {
         cronometro?.stop()
         cronometro?.visibility = android.view.View.GONE
-        val fichero = grabadora.parar()
+        ServicioGrabacion.parar(this)
         grabando = false
         botonGrabar.text = "🎙️  EMPEZAR A GRABAR"
         botonGrabar.background = GradientDrawable().apply {
             setColor(Color.parseColor("#0B7A3B")); cornerRadius = 26f
         }
 
-        if (fichero == null || !fichero.exists() || fichero.length() == 0L) {
-            estado.text = "La grabación no se guardó bien. Inténtelo de nuevo."
-            estado.setTextColor(Color.parseColor("#F87171"))
-            return
-        }
-
-        estado.text = "⏳ Transcribiendo… (si el servidor estaba dormido, puede tardar medio minuto en despertar)"
+        estado.text = "⏳ Cerrando la grabación…"
         estado.setTextColor(Color.parseColor("#FACC15"))
         botonGrabar.isEnabled = false
 
         lifecycleScope.launch {
+            // El servicio necesita un instante para cerrar el fichero de
+            // audio. Se le espera en vez de dar por hecho que ya esta:
+            // leerlo a medio cerrar daria un audio corrupto.
+            var fichero: java.io.File? = null
+            repeat(20) {
+                kotlinx.coroutines.delay(250)
+                fichero = ServicioGrabacion.ficheroListo
+                if (fichero != null) return@repeat
+            }
+
+            val f = fichero
+            if (f == null || !f.exists() || f.length() == 0L) {
+                estado.text = "❌ La grabación no se guardó bien.\n" +
+                    (ServicioGrabacion.ultimoFallo ?: "Inténtelo de nuevo.")
+                estado.setTextColor(Color.parseColor("#F87171"))
+                botonGrabar.isEnabled = true
+                return@launch
+            }
+
+            estado.text = "⏳ Transcribiendo… (las clases largas se parten en trozos)"
+            estado.setTextColor(Color.parseColor("#FACC15"))
             try {
                 servidor = Servidor(ajustes.servidor) // por si cambió la direccion
-                val resultado = servidor.transcribir(fichero, campoAsignatura.text.toString())
+                val resultado = servidor.transcribir(f, campoAsignatura.text.toString())
                 textoResultado.text = resultado.texto
                 estado.text = "✅ Transcrito y guardado (${resultado.fichero})"
                 estado.setTextColor(Color.parseColor("#4ADE80"))
-                fichero.delete() // el audio ya no hace falta: el texto ya está a salvo en el servidor
+                f.delete() // el audio ya no hace falta: el texto ya está a salvo en el servidor
                 habilitarResumen(resultado.fichero)
                 cargarLista()
             } catch (e: Exception) {
