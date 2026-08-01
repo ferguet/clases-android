@@ -11,7 +11,8 @@ class Ajustes(contexto: Context) {
     private val p = contexto.getSharedPreferences("clases", Context.MODE_PRIVATE)
 
     var servidor: String
-        get() = p.getString("servidor", "http://192.168.4.43:8000") ?: "http://192.168.4.43:8000"
+        get() = p.getString("servidor", "https://ai-council-ekax.onrender.com")
+            ?: "https://ai-council-ekax.onrender.com"
         set(v) = p.edit().putString("servidor", v.trim().trimEnd('/')).apply()
 
     var ultimaAsignatura: String
