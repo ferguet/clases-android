@@ -7,6 +7,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -74,6 +75,29 @@ class Servidor(private val base: String) {
             val json = JSONObject(resp.body?.string() ?: "{}")
             val arr = json.optJSONArray("clases") ?: return@withContext emptyList()
             (0 until arr.length()).map { arr.getString(it) }
+        }
+    }
+
+    data class Resumen(val texto: String, val fichero: String)
+
+    /**
+     * Pide el resumen de una clase ya transcrita. Puede tardar diez o
+     * veinte segundos -la IA tiene que leer toda la clase-, de ahi que use
+     * el mismo cliente de timeout largo que la transcripcion.
+     */
+    suspend fun resumir(ficheroTranscripcion: String): Resumen = withContext(Dispatchers.IO) {
+        val peticion = Request.Builder()
+            .url("$base/clases/resumir/$ficheroTranscripcion")
+            .post(ByteArray(0).toRequestBody(null))
+            .build()
+        cliente.newCall(peticion).execute().use { resp ->
+            val cuerpo = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, cuerpo))
+            val json = JSONObject(cuerpo)
+            Resumen(
+                texto = json.optString("resumen", "(sin resumen)"),
+                fichero = json.optString("fichero", "")
+            )
         }
     }
 

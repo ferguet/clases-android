@@ -36,6 +36,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var campoAsignatura: EditText
     private lateinit var textoResultado: TextView
     private lateinit var listaClases: LinearLayout
+    private lateinit var botonResumir: Button
+
+    /** El fichero de la transcripcion que se está viendo ahora mismo, para
+     *  poder pedir su resumen sin tener que volver a buscarlo. */
+    private var ficheroVisible: String? = null
 
     private var grabando = false
     private var cronometro: Chronometer? = null
@@ -108,6 +113,11 @@ class MainActivity : AppCompatActivity() {
         }
         raiz.addView(textoResultado)
 
+        botonResumir = boton("📝  RESUMIR EN APUNTES", "#7C2D6E") { alPulsarResumir() }
+        botonResumir.isEnabled = false
+        botonResumir.alpha = 0.5f
+        raiz.addView(botonResumir)
+
         raiz.addView(hueco(30))
         raiz.addView(texto("CLASES ANTERIORES", 13f, Color.parseColor("#7E8AA0")))
         listaClases = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -178,6 +188,7 @@ class MainActivity : AppCompatActivity() {
                 estado.text = "✅ Transcrito y guardado (${resultado.fichero})"
                 estado.setTextColor(Color.parseColor("#4ADE80"))
                 fichero.delete() // el audio ya no hace falta: el texto ya está a salvo en el servidor
+                habilitarResumen(resultado.fichero)
                 cargarLista()
             } catch (e: Exception) {
                 estado.text = "❌ ${e.message}"
@@ -203,8 +214,48 @@ class MainActivity : AppCompatActivity() {
                         textoResultado.text = try { servidor.leer(nombre) } catch (e: Exception) { "(error al leer)" }
                         estado.text = "Mostrando: $nombre"
                         estado.setTextColor(Color.parseColor("#9AA4B2"))
+                        // Los ficheros de resumen ("_resumen.txt") no se
+                        // resumen otra vez: no tiene sentido pedirle a la
+                        // IA que resuma su propio resumen.
+                        if (nombre.endsWith("_resumen.txt")) {
+                            botonResumir.isEnabled = false; botonResumir.alpha = 0.5f
+                            ficheroVisible = null
+                        } else {
+                            habilitarResumen(nombre)
+                        }
                     }
                 })
+            }
+        }
+    }
+
+    private fun habilitarResumen(fichero: String) {
+        ficheroVisible = fichero
+        botonResumir.isEnabled = true
+        botonResumir.alpha = 1f
+    }
+
+    private fun alPulsarResumir() {
+        val fichero = ficheroVisible ?: return
+        botonResumir.isEnabled = false
+        estado.text = "⏳ Convirtiendo en apuntes… (puede tardar medio minuto)"
+        estado.setTextColor(Color.parseColor("#FACC15"))
+
+        lifecycleScope.launch {
+            try {
+                val resultado = servidor.resumir(fichero)
+                textoResultado.text = resultado.texto
+                estado.text = "✅ Apuntes listos (${resultado.fichero})"
+                estado.setTextColor(Color.parseColor("#4ADE80"))
+                // El resumen ya se enseña; no tiene sentido resumir un
+                // resumen, así que el botón se queda apagado hasta que se
+                // cargue otra transcripción.
+                ficheroVisible = null
+                cargarLista()
+            } catch (e: Exception) {
+                estado.text = "❌ ${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
+                botonResumir.isEnabled = true
             }
         }
     }
