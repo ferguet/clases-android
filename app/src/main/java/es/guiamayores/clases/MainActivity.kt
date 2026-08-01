@@ -14,12 +14,16 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 /**
- * PRIMER PASO DEL PROYECTO DE CLASES: GRABAR Y TRANSCRIBIR. NADA MAS.
+ * GRABAR, TRANSCRIBIR, RESUMIR, CRUZAR CON DIAPOSITIVAS Y PROPONER EXAMEN.
  *
- * Deliberadamente pequeño. Nada de entonacion, nada de examenes del MIR,
- * nada de diapositivas: eso son capas que se añaden despues, una vez esta
- * capa base -tener el audio convertido en texto limpio- funciona de
- * verdad. Es el mismo enfoque por fases que Cuidame.
+ * Construida por fases, igual que Cuidame: primero grabar y transcribir,
+ * despues el resumen en apuntes, y ahora estas dos capas mas que ya
+ * existian en la version web y le faltaban a esta pantalla:
+ * - Cruzar la clase con el PDF de las diapositivas del profesor (lo que
+ *   resalta -negrita, color, subrayado- frente a lo que se explico).
+ * - Proponer preguntas de examen, con examenes que suba la persona
+ *   (incluso escaneados: se leen con reconocimiento de imagen) o
+ *   buscando en internet si no tiene ninguno a mano.
  *
  * SIN DATOS DE PACIENTES. Esta pantalla es para clases y estudio. El modo
  * de practicas hospitalarias necesitaria su propio filtro de anonimizado
@@ -37,10 +41,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textoResultado: TextView
     private lateinit var listaClases: LinearLayout
     private lateinit var botonResumir: Button
+    private lateinit var botonCruzar: Button
+    private lateinit var botonExamen: Button
+    private lateinit var botonExamenPdf: Button
 
     /** El fichero de la transcripcion que se está viendo ahora mismo, para
-     *  poder pedir su resumen sin tener que volver a buscarlo. */
+     *  poder pedir su resumen sin tener que volver a buscarlo. Solo tiene
+     *  valor cuando lo que se ve es la transcripcion cruda: un resumen, una
+     *  guia de prioridades o un examen no se pueden volver a resumir. */
     private var ficheroVisible: String? = null
+
+    /** La transcripcion ORIGINAL sobre la que trabajan cruzar y examen,
+     *  aunque en pantalla se esté viendo uno de sus derivados (el resumen,
+     *  la guia de prioridades o las preguntas de examen). Sin esto, ver un
+     *  derivado desactivaba estos botones y no habia forma de usarlos. */
+    private var ficheroBaseActual: String? = null
 
     private var grabando = false
     private var cronometro: Chronometer? = null
@@ -60,6 +75,16 @@ class MainActivity : AppCompatActivity() {
     private val elegirAudio = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) transcribirDeFuera(uri) }
+
+    /** Elegir el PDF de las diapositivas para cruzarlo con la clase. */
+    private val elegirPdfDiapositivas = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) alPulsarCruzar(uri) }
+
+    /** Elegir un PDF de exámenes anteriores para basar las preguntas en ellos. */
+    private val elegirPdfExamen = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) alPulsarExamen(uri) }
 
     private val pedirPermiso = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
@@ -178,6 +203,47 @@ class MainActivity : AppCompatActivity() {
         botonResumir.alpha = 0.5f
         raiz.addView(botonResumir)
 
+        // CRUZAR CON LAS DIAPOSITIVAS DEL PROFESOR.
+        //
+        // El PDF hace falta siempre aqui (a diferencia del examen, este
+        // boton no tiene version "sin PDF"): sin diapositivas no hay nada
+        // que cruzar con lo que se dijo en clase.
+        botonCruzar = boton("📊  CRUZAR CON LAS DIAPOSITIVAS (PDF)", "#1D4ED8") {
+            guardarServidor()
+            try {
+                elegirPdfDiapositivas.launch(arrayOf("application/pdf"))
+            } catch (e: Exception) {
+                avisar("No se pudo abrir el explorador de archivos")
+            }
+        }
+        botonCruzar.isEnabled = false
+        botonCruzar.alpha = 0.5f
+        raiz.addView(botonCruzar)
+
+        // PROPONER PREGUNTAS DE EXAMEN.
+        //
+        // Dos caminos, porque la realidad es asi: a veces se tienen los
+        // examenes de la asignatura a mano (incluso escaneados: se leen
+        // pagina a pagina con reconocimiento de imagen) y a veces no, y
+        // entonces se busca en internet. El boton grande no pide PDF; el
+        // pequeño de debajo sirve para adjuntar uno.
+        botonExamen = boton("❓  PROPONER PREGUNTAS DE EXAMEN", "#0B7A3B") { alPulsarExamen(null) }
+        botonExamen.isEnabled = false
+        botonExamen.alpha = 0.5f
+        raiz.addView(botonExamen)
+
+        botonExamenPdf = botonPequeno("📎  …usando exámenes que suba (PDF, incluso escaneados)") {
+            guardarServidor()
+            try {
+                elegirPdfExamen.launch(arrayOf("application/pdf"))
+            } catch (e: Exception) {
+                avisar("No se pudo abrir el explorador de archivos")
+            }
+        }
+        botonExamenPdf.isEnabled = false
+        botonExamenPdf.alpha = 0.5f
+        raiz.addView(botonExamenPdf)
+
         raiz.addView(hueco(30))
         raiz.addView(texto("CLASES ANTERIORES", 13f, Color.parseColor("#7E8AA0")))
         listaClases = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -292,7 +358,7 @@ class MainActivity : AppCompatActivity() {
                 estado.text = "✅ Transcrito y guardado (${resultado.fichero})"
                 estado.setTextColor(Color.parseColor("#4ADE80"))
                 f.delete() // el audio ya no hace falta: el texto ya está a salvo en el servidor
-                habilitarResumen(resultado.fichero)
+                habilitarAcciones(resultado.fichero, esCruda = true)
                 cargarLista()
             } catch (e: Exception) {
                 estado.text = "❌ ${e.message}"
@@ -331,11 +397,21 @@ class MainActivity : AppCompatActivity() {
             }
             for (nombre in clases.take(20)) {
                 // Que se vea de un vistazo qué es cada cosa: la
-                // transcripción literal o los apuntes ya resumidos.
-                val etiqueta = if (nombre.endsWith("_resumen.txt"))
-                    "📝  " + nombre.removeSuffix("_resumen.txt") + "  (apuntes)"
-                else
-                    "🎙️  " + nombre.removeSuffix(".txt")
+                // transcripción literal, los apuntes, la guía de
+                // prioridades o las preguntas de examen. Antes solo se
+                // distinguía el resumen; todo lo demás salía con el mismo
+                // icono de grabación, y no había forma de saber qué era
+                // qué sin abrirlo.
+                val etiqueta = when {
+                    nombre.endsWith("_resumen.txt") ->
+                        "📝  " + nombre.removeSuffix("_resumen.txt") + "  (apuntes)"
+                    nombre.endsWith("_prioridades.txt") ->
+                        "📊  " + nombre.removeSuffix("_prioridades.txt") + "  (prioridades con diapositivas)"
+                    nombre.endsWith("_examen.txt") ->
+                        "❓  " + nombre.removeSuffix("_examen.txt") + "  (preguntas de examen)"
+                    else ->
+                        "🎙️  " + nombre.removeSuffix(".txt")
+                }
                 // Cada clase con su propia papelera al lado: borrar la
                 // grabación de prueba sin llevarse por delante las buenas.
                 val fila = LinearLayout(this@MainActivity).apply {
@@ -376,17 +452,21 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         estado.text = "Cargando…"
                         textoResultado.text = try { servidor.leer(nombre) } catch (e: Exception) { "(error al leer)" }
-                        estado.text = "Mostrando: $nombre"
+                        // CRUZAR Y EXAMEN SIGUEN ACTIVOS AUNQUE SE ESTÉ
+                        // VIENDO UN DERIVADO.
+                        //
+                        // Antes estos botones se apagaban en cuanto se
+                        // abría cualquier cosa que no fuera la transcripción
+                        // cruda, y no había forma de comprobarlos sin volver
+                        // a buscar la grabación original en la lista. Los
+                        // dos trabajan siempre sobre la transcripción base,
+                        // así que se resuelve aquí cuál es y se dejan
+                        // encendidos se mire lo que se mire.
+                        val base = baseDe(nombre)
+                        estado.text = if (nombre == base) "Mostrando: $nombre"
+                            else "Mostrando: $nombre\n(Cruzar y Examen usarán la transcripción: $base)"
                         estado.setTextColor(Color.parseColor("#9AA4B2"))
-                        // Los ficheros de resumen ("_resumen.txt") no se
-                        // resumen otra vez: no tiene sentido pedirle a la
-                        // IA que resuma su propio resumen.
-                        if (nombre.endsWith("_resumen.txt")) {
-                            botonResumir.isEnabled = false; botonResumir.alpha = 0.5f
-                            ficheroVisible = null
-                        } else {
-                            habilitarResumen(nombre)
-                        }
+                        habilitarAcciones(base, esCruda = (nombre == base))
                     }
                 }
                 principal.layoutParams = LinearLayout.LayoutParams(0, 110, 1f)
@@ -447,7 +527,7 @@ class MainActivity : AppCompatActivity() {
                 textoResultado.text = resultado.texto
                 estado.text = "✅ Transcrito y guardado (${resultado.fichero})"
                 estado.setTextColor(Color.parseColor("#4ADE80"))
-                habilitarResumen(resultado.fichero)
+                habilitarAcciones(resultado.fichero, esCruda = true)
                 cargarLista()
             } catch (e: Exception) {
                 estado.text = "❌ ${e.message}"
@@ -459,8 +539,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** El nombre real del fichero elegido, para que el servidor lo reciba
-     *  con su extension correcta (mp3, wav, m4a...). */
-    private fun nombreDelFichero(uri: android.net.Uri): String {
+     *  con su extension correcta (mp3, wav, m4a, pdf...). */
+    private fun nombreDelFichero(uri: android.net.Uri, porDefecto: String = "audio_importado.mp3"): String {
         var nombre: String? = null
         try {
             contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -468,7 +548,141 @@ class MainActivity : AppCompatActivity() {
                 if (i >= 0 && c.moveToFirst()) nombre = c.getString(i)
             }
         } catch (e: Exception) {}
-        return (nombre ?: "audio_importado.mp3").replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return (nombre ?: porDefecto).replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
+    /** Copia a una carpeta propia un fichero elegido de otra app (un PDF,
+     *  aqui). Hace falta porque el "uri" que da el explorador de Android es
+     *  un permiso temporal para leer, no una ruta real, y OkHttp necesita
+     *  un fichero de verdad para subirlo. */
+    private suspend fun copiarUriAFichero(uri: android.net.Uri, porDefecto: String): java.io.File =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val nombre = nombreDelFichero(uri, porDefecto)
+            val carpeta = java.io.File(cacheDir, "importados").apply { mkdirs() }
+            val destino = java.io.File(carpeta, nombre)
+            contentResolver.openInputStream(uri)?.use { entrada ->
+                destino.outputStream().use { salida -> entrada.copyTo(salida) }
+            } ?: throw Exception("No se pudo abrir el archivo elegido")
+            destino
+        }
+
+    /**
+     * Cruza la clase con el PDF de las diapositivas del profesor.
+     *
+     * A diferencia de examen, aquí el PDF es obligatorio: sin diapositivas
+     * no hay nada que cruzar. Si el PDF es un escaneo sin texto, el
+     * servidor lo rechaza con un mensaje claro -este cruce necesita el
+     * FORMATO del texto (negrita, color…), que una imagen no tiene-.
+     */
+    private fun alPulsarCruzar(uri: android.net.Uri) {
+        val base = ficheroBaseActual
+        if (base == null) { avisar("Elija antes una clase de la lista"); return }
+        botonCruzar.isEnabled = false
+        estado.text = "📎 Preparando el PDF…"
+        estado.setTextColor(Color.parseColor("#FACC15"))
+
+        lifecycleScope.launch {
+            var copia: java.io.File? = null
+            val vigilante = lifecycleScope.launch {
+                while (true) {
+                    kotlinx.coroutines.delay(3000)
+                    val a = servidor.progreso(base) ?: continue
+                    if (a.estado == "trabajando") {
+                        estado.text = "⏳ Cruzando… ${a.porcentaje}%  (parte ${a.parte} de ${a.total})"
+                        botonCruzar.text = "📊 Cruzando… ${a.porcentaje}%"
+                    }
+                }
+            }
+            try {
+                copia = copiarUriAFichero(uri, "diapositivas.pdf")
+                estado.text = "⏳ Cruzando con las diapositivas…"
+                estado.setTextColor(Color.parseColor("#FACC15"))
+
+                val resultado = servidor.cruzar(base, copia)
+                textoResultado.text = resultado.guia
+                estado.text = "✅ Guía de prioridades lista (${resultado.fichero}). " +
+                    "Resaltados detectados en el PDF: ${resultado.resaltados}." +
+                    if (resultado.recortado)
+                        " (El PDF es largo: solo se ha mirado una parte de las páginas.)"
+                    else ""
+                estado.setTextColor(Color.parseColor("#4ADE80"))
+                cargarLista()
+            } catch (e: Exception) {
+                estado.text = "❌ ${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
+            } finally {
+                vigilante.cancel()
+                botonCruzar.text = "📊  CRUZAR CON LAS DIAPOSITIVAS (PDF)"
+                botonCruzar.isEnabled = true
+                copia?.delete()
+            }
+        }
+    }
+
+    /**
+     * Propone preguntas de examen sobre la clase.
+     *
+     * @param uri un PDF de exámenes anteriores, o null para que el
+     *   servidor busque en internet (o, si tampoco encuentra nada, genere
+     *   las preguntas solo con lo explicado en clase).
+     *
+     * SIN PORCENTAJE REAL A PROPÓSITO. A diferencia de resumir y cruzar,
+     * el servidor no cuenta partes en este paso, así que aquí no se
+     * inventa un número que no es de verdad: solo unos puntos que se
+     * mueven, para que quede claro que sigue trabajando y no que se ha
+     * quedado colgado.
+     */
+    private fun alPulsarExamen(uri: android.net.Uri?) {
+        val base = ficheroBaseActual
+        if (base == null) { avisar("Elija antes una clase de la lista"); return }
+        botonExamen.isEnabled = false
+        botonExamenPdf.isEnabled = false
+        val textoExamenOriginal = botonExamen.text
+        val textoExamenPdfOriginal = botonExamenPdf.text
+
+        lifecycleScope.launch {
+            var copia: java.io.File? = null
+            val animacion = lifecycleScope.launch {
+                var puntos = 0
+                while (true) {
+                    kotlinx.coroutines.delay(600)
+                    puntos = (puntos + 1) % 4
+                    val d = ".".repeat(puntos)
+                    botonExamen.text = "⏳ Trabajando$d"
+                    botonExamenPdf.text = "⏳ Trabajando$d"
+                }
+            }
+            try {
+                if (uri != null) {
+                    estado.text = "📎 Preparando el PDF…"
+                    estado.setTextColor(Color.parseColor("#FACC15"))
+                    copia = copiarUriAFichero(uri, "examen.pdf")
+                }
+                estado.text = "⏳ Proponiendo preguntas de examen…\n" +
+                    "(si el PDF es un escaneo, se lee página a página: puede tardar)"
+                estado.setTextColor(Color.parseColor("#FACC15"))
+
+                val resultado = servidor.preguntas(base, copia)
+                val partes = StringBuilder(resultado.preguntas)
+                partes.append("\n\n---\nDE DÓNDE SALEN ESTAS PREGUNTAS: ").append(resultado.origen)
+                for (f in resultado.fuentes) partes.append("\n- ").append(f.titulo).append(": ").append(f.url)
+                for (linea in resultado.diario) partes.append("\n(").append(linea).append(")")
+                textoResultado.text = partes.toString()
+                estado.text = "✅ Preguntas listas (${resultado.fichero})"
+                estado.setTextColor(Color.parseColor("#4ADE80"))
+                cargarLista()
+            } catch (e: Exception) {
+                estado.text = "❌ ${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
+            } finally {
+                animacion.cancel()
+                botonExamen.text = textoExamenOriginal
+                botonExamenPdf.text = textoExamenPdfOriginal
+                botonExamen.isEnabled = true
+                botonExamenPdf.isEnabled = true
+                copia?.delete()
+            }
+        }
     }
 
     /** Toma la direccion escrita en pantalla como la buena. */
@@ -505,10 +719,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun habilitarResumen(fichero: String) {
-        ficheroVisible = fichero
-        botonResumir.isEnabled = true
-        botonResumir.alpha = 1f
+    /**
+     * Deja listos los botones que dependen de una transcripción concreta.
+     *
+     * @param base la transcripción original (nunca un derivado: cruzar y
+     *   examen siempre trabajan sobre el audio ya transcrito, no sobre un
+     *   resumen ni sobre una guía de prioridades).
+     * @param esCruda si lo que se ve en pantalla ahora mismo es esa
+     *   transcripción cruda. Solo entonces tiene sentido resumirla: pedirle
+     *   a la IA que resuma un resumen no da un resultado mejor, da uno peor.
+     */
+    private fun habilitarAcciones(base: String, esCruda: Boolean) {
+        ficheroBaseActual = base
+        botonCruzar.isEnabled = true; botonCruzar.alpha = 1f
+        botonExamen.isEnabled = true; botonExamen.alpha = 1f
+        botonExamenPdf.isEnabled = true; botonExamenPdf.alpha = 1f
+        if (esCruda) {
+            ficheroVisible = base
+            botonResumir.isEnabled = true; botonResumir.alpha = 1f
+        } else {
+            ficheroVisible = null
+            botonResumir.isEnabled = false; botonResumir.alpha = 0.5f
+        }
+    }
+
+    /** De un derivado (resumen, prioridades o examen) recupera el nombre de
+     *  la transcripción original de la que salió. Si ya es la transcripción
+     *  cruda, se devuelve ella misma. Tiene que ser la operación inversa
+     *  exacta de cómo el servidor construye esos nombres. */
+    private fun baseDe(nombre: String): String = when {
+        nombre.endsWith("_resumen.txt") -> nombre.removeSuffix("_resumen.txt") + ".txt"
+        nombre.endsWith("_prioridades.txt") -> nombre.removeSuffix("_prioridades.txt") + ".txt"
+        nombre.endsWith("_examen.txt") -> nombre.removeSuffix("_examen.txt") + ".txt"
+        else -> nombre
     }
 
     private fun alPulsarResumir() {

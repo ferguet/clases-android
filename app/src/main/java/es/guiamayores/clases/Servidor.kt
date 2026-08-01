@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -90,7 +91,14 @@ class Servidor(private val base: String) {
         502 -> "El servidor no ha podido hablar con el servicio de transcripción. " +
                "Puede ser un fallo pasajero: pruebe otra vez en un minuto."
         500 -> "El servidor no tiene configurada la clave de transcripción."
-        else -> "Error del servidor ($codigo): ${cuerpo.take(200)}"
+        else -> {
+            // El servidor manda el motivo real en JSON ({"detail": "..."}),
+            // por ejemplo cuando un PDF de diapositivas es un escaneo sin
+            // texto. Enseñar ese motivo tal cual es mejor que un bloque de
+            // JSON en crudo, que no dice nada a quien lo lee.
+            val detalle = try { JSONObject(cuerpo).optString("detail", "") } catch (e: Exception) { "" }
+            if (detalle.isNotBlank()) detalle else "Error del servidor ($codigo): ${cuerpo.take(200)}"
+        }
     }
 
     suspend fun listar(): List<String> = withContext(Dispatchers.IO) {
@@ -164,6 +172,101 @@ class Servidor(private val base: String) {
         cliente.newCall(peticion).execute().use { resp ->
             if (!resp.isSuccessful) return@withContext "(no se pudo leer)"
             JSONObject(resp.body?.string() ?: "{}").optString("texto", "")
+        }
+    }
+
+    data class Cruce(
+        val guia: String, val fichero: String, val resaltados: Int,
+        val paginas: Int, val recortado: Boolean,
+    )
+
+    /**
+     * Cruza la transcripción con el PDF de las diapositivas del profesor.
+     *
+     * El PDF es obligatorio aquí (el servidor lo exige): sin diapositivas
+     * no hay nada que cruzar. Usa el mismo cliente de timeout largo que
+     * resumir, porque el servidor lo hace por partes y puede tardar varios
+     * minutos en una clase larga.
+     */
+    suspend fun cruzar(ficheroTranscripcion: String, pdf: File): Cruce = withContext(Dispatchers.IO) {
+        val cuerpo = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("pdf", pdf.name, pdf.asRequestBody("application/pdf".toMediaType()))
+            .build()
+        val peticion = Request.Builder()
+            .url("$base/clases/diapositivas/$ficheroTranscripcion")
+            .post(cuerpo)
+            .build()
+        cliente.newCall(peticion).execute().use { resp ->
+            val texto = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, texto))
+            val json = JSONObject(texto)
+            Cruce(
+                guia = json.optString("guia", "(sin resultado)"),
+                fichero = json.optString("fichero", ""),
+                resaltados = json.optInt("resaltados", 0),
+                paginas = json.optInt("paginas", 0),
+                recortado = json.optBoolean("recortado", false),
+            )
+        }
+    }
+
+    data class Fuente(val titulo: String, val url: String)
+
+    data class Examen(
+        val preguntas: String, val fichero: String, val origen: String,
+        val fuentes: List<Fuente>, val diario: List<String>,
+    )
+
+    /**
+     * Propone preguntas de examen sobre la clase.
+     *
+     * @param pdf exámenes anteriores en PDF (incluso escaneados: el
+     *   servidor los lee con reconocimiento de imagen), o null para que
+     *   busque en internet -y si tampoco encuentra nada, para que genere
+     *   las preguntas solo con lo explicado en clase, diciéndolo claramente.
+     *
+     * Sin PDF se manda un cuerpo vacío, igual que resumir(): esta ruta
+     * acepta el PDF como opcional, así que no hace falta simular un
+     * formulario con campos de relleno.
+     */
+    suspend fun preguntas(ficheroTranscripcion: String, pdf: File?): Examen = withContext(Dispatchers.IO) {
+        val cuerpo: RequestBody = if (pdf != null)
+            MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("pdf", pdf.name, pdf.asRequestBody("application/pdf".toMediaType()))
+                .build()
+        else
+            ByteArray(0).toRequestBody(null)
+
+        val peticion = Request.Builder()
+            .url("$base/clases/examen/$ficheroTranscripcion?buscar=true")
+            .post(cuerpo)
+            .build()
+        cliente.newCall(peticion).execute().use { resp ->
+            val texto = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, texto))
+            val json = JSONObject(texto)
+
+            val fuentes = mutableListOf<Fuente>()
+            json.optJSONArray("fuentes")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val f = arr.getJSONObject(i)
+                    fuentes.add(Fuente(f.optString("titulo", ""), f.optString("url", "")))
+                }
+            }
+            val diario = mutableListOf<String>()
+            json.optJSONArray("diario")?.let { arr ->
+                for (i in 0 until arr.length()) diario.add(arr.getString(i))
+            }
+
+            Examen(
+                preguntas = json.optString("preguntas", "(sin preguntas)"),
+                fichero = json.optString("fichero", ""),
+                origen = json.optString("origen", ""),
+                fuentes = fuentes,
+                diario = diario,
+            )
         }
     }
 }
