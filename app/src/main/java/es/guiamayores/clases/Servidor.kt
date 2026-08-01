@@ -24,7 +24,14 @@ import java.util.concurrent.TimeUnit
 class Servidor(private val base: String) {
 
     private val cliente = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        // 90 segundos, no 30. El servidor vive en el plan gratuito de
+        // Render, que se apaga solo tras 15 minutos sin uso: la primera
+        // peticion despues de eso tiene que esperar a que arranque de
+        // nuevo, y eso puede tardar medio minuto largo. Con 30 s fallaba
+        // por "failed to connect" justo en ese caso -el peor momento para
+        // fallar, porque parece un fallo de verdad y solo es el servidor
+        // desperezandose-.
+        .connectTimeout(90, TimeUnit.SECONDS)
         .writeTimeout(5, TimeUnit.MINUTES)
         .readTimeout(5, TimeUnit.MINUTES)
         .build()

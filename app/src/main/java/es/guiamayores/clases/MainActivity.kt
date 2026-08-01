@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        estado.text = "⏳ Transcribiendo… (puede tardar un poco)"
+        estado.text = "⏳ Transcribiendo… (si el servidor estaba dormido, puede tardar medio minuto en despertar)"
         estado.setTextColor(Color.parseColor("#FACC15"))
         botonGrabar.isEnabled = false
 
