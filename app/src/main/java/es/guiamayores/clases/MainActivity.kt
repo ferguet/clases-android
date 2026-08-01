@@ -368,7 +368,8 @@ class MainActivity : AppCompatActivity() {
             try {
                 val clases = servidor.listar()
                 estado.text = "✅ El servidor contesta.\n$direccion\n" +
-                              "Clases guardadas: ${clases.size}"
+                              "Clases guardadas: ${clases.size}\n" +
+                              "Se guardan en: ${servidor.ultimoGuardadoEn}"
                 estado.setTextColor(Color.parseColor("#4ADE80"))
                 cargarLista()
             } catch (e: Exception) {

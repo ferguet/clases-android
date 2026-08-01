@@ -36,6 +36,10 @@ class Servidor(private val base: String) {
         .readTimeout(5, TimeUnit.MINUTES)
         .build()
 
+    /** Lo que dijo el servidor la ultima vez sobre donde guarda las clases. */
+    var ultimoGuardadoEn: String = ""
+        private set
+
     data class Resultado(val texto: String, val fichero: String)
 
     /**
@@ -90,8 +94,13 @@ class Servidor(private val base: String) {
             // error: "no hay clases" y "no he podido preguntar" son cosas
             // distintas, y confundirlas deja a la persona mirando una
             // lista vacia sin saber que en realidad no hay conexion.
-            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, resp.body?.string() ?: ""))
-            val json = JSONObject(resp.body?.string() ?: "{}")
+            val cuerpo = resp.body?.string() ?: "{}"
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, cuerpo))
+            val json = JSONObject(cuerpo)
+            // Donde acaban guardadas las clases. Se enseña en pantalla:
+            // saber si tus apuntes están a salvo o no, no debería ser algo
+            // que la persona tenga que suponer.
+            ultimoGuardadoEn = json.optString("guardado_en", "")
             val arr = json.optJSONArray("clases") ?: return@withContext emptyList()
             (0 until arr.length()).map { arr.getString(it) }
         }
