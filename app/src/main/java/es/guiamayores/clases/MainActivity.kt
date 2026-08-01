@@ -295,7 +295,43 @@ class MainActivity : AppCompatActivity() {
                     "📝  " + nombre.removeSuffix("_resumen.txt") + "  (apuntes)"
                 else
                     "🎙️  " + nombre.removeSuffix(".txt")
-                listaClases.addView(botonPequeno(etiqueta) {
+                // Cada clase con su propia papelera al lado: borrar la
+                // grabación de prueba sin llevarse por delante las buenas.
+                val fila = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = 8 }
+                }
+                val papelera = Button(this@MainActivity).apply {
+                    text = "🗑️"
+                    textSize = 16f
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor("#3A1E24")); cornerRadius = 16f
+                    }
+                    layoutParams = LinearLayout.LayoutParams(150, 110).apply { leftMargin = 8 }
+                    setOnClickListener {
+                        android.app.AlertDialog.Builder(this@MainActivity)
+                            .setTitle("¿Borrar esta clase?")
+                            .setMessage("$nombre\n\nEsto no se puede deshacer.")
+                            .setNegativeButton("No", null)
+                            .setPositiveButton("Sí, borrar") { _, _ ->
+                                lifecycleScope.launch {
+                                    try {
+                                        servidor.borrar(nombre)
+                                        estado.text = "🗑️ Borrada: $nombre"
+                                        estado.setTextColor(Color.parseColor("#9AA4B2"))
+                                        cargarLista()
+                                    } catch (e: Exception) {
+                                        estado.text = "❌ No se pudo borrar. ${e.message}"
+                                        estado.setTextColor(Color.parseColor("#F87171"))
+                                    }
+                                }
+                            }.show()
+                    }
+                }
+                val principal = botonPequeno(etiqueta) {
                     lifecycleScope.launch {
                         estado.text = "Cargando…"
                         textoResultado.text = try { servidor.leer(nombre) } catch (e: Exception) { "(error al leer)" }
@@ -311,7 +347,11 @@ class MainActivity : AppCompatActivity() {
                             habilitarResumen(nombre)
                         }
                     }
-                })
+                }
+                principal.layoutParams = LinearLayout.LayoutParams(0, 110, 1f)
+                fila.addView(principal)
+                fila.addView(papelera)
+                listaClases.addView(fila)
             }
         }
     }
@@ -433,8 +473,26 @@ class MainActivity : AppCompatActivity() {
     private fun alPulsarResumir() {
         val fichero = ficheroVisible ?: return
         botonResumir.isEnabled = false
-        estado.text = "⏳ Convirtiendo en apuntes… (puede tardar medio minuto)"
+        estado.text = "⏳ Convirtiendo en apuntes…"
         estado.setTextColor(Color.parseColor("#FACC15"))
+
+        // POR DONDE VA, DE VERDAD.
+        //
+        // Resumir una clase larga tarda minutos, y antes el botón se
+        // quedaba mudo todo ese rato: no había forma de distinguir "está
+        // trabajando" de "se ha colgado". El porcentaje que sale aquí es
+        // real -partes resumidas de partes totales, contadas por el
+        // servidor-, no una barra decorativa que avanza sola.
+        val vigilante = lifecycleScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(3000)
+                val a = servidor.progreso(fichero) ?: continue
+                if (a.estado == "trabajando") {
+                    estado.text = "⏳ Resumiendo… ${a.porcentaje}%  (parte ${a.parte} de ${a.total})"
+                    botonResumir.text = "📝 Resumiendo… ${a.porcentaje}%"
+                }
+            }
+        }
 
         lifecycleScope.launch {
             try {
@@ -451,6 +509,9 @@ class MainActivity : AppCompatActivity() {
                 estado.text = "❌ ${e.message}"
                 estado.setTextColor(Color.parseColor("#F87171"))
                 botonResumir.isEnabled = true
+            } finally {
+                vigilante.cancel()
+                botonResumir.text = "📝  RESUMIR EN APUNTES"
             }
         }
     }

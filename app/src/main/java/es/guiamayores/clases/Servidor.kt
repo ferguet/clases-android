@@ -135,6 +135,30 @@ class Servidor(private val base: String) {
         }
     }
 
+    data class Avance(val estado: String, val porcentaje: Int, val parte: Int, val total: Int)
+
+    /** Por donde va el resumen. Se pregunta cada pocos segundos mientras trabaja. */
+    suspend fun progreso(fichero: String): Avance? = withContext(Dispatchers.IO) {
+        try {
+            val peticion = Request.Builder().url("$base/clases/progreso/$fichero").get().build()
+            cliente.newCall(peticion).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val j = JSONObject(resp.body?.string() ?: "{}")
+                Avance(
+                    j.optString("estado", "?"), j.optInt("porcentaje", 0),
+                    j.optInt("parte", 0), j.optInt("total", 0)
+                )
+            }
+        } catch (e: Exception) { null }
+    }
+
+    suspend fun borrar(fichero: String) = withContext(Dispatchers.IO) {
+        val peticion = Request.Builder().url("$base/clases/borrar/$fichero").delete().build()
+        cliente.newCall(peticion).execute().use { resp ->
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, resp.body?.string() ?: ""))
+        }
+    }
+
     suspend fun leer(fichero: String): String = withContext(Dispatchers.IO) {
         val peticion = Request.Builder().url("$base/clases/leer/$fichero").get().build()
         cliente.newCall(peticion).execute().use { resp ->
