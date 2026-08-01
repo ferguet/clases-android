@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var estado: TextView
     private lateinit var botonGrabar: Button
     private lateinit var campoAsignatura: EditText
+    private lateinit var campoServidor: EditText
     private lateinit var textoResultado: TextView
     private lateinit var listaClases: LinearLayout
     private lateinit var botonResumir: Button
@@ -70,6 +71,27 @@ class MainActivity : AppCompatActivity() {
             "pacientes: esto es para clases y estudio.",
             15f, Color.parseColor("#9AA4B2")
         ))
+
+        // LA DIRECCION DEL SERVIDOR, A LA VISTA Y EDITABLE.
+        //
+        // Estaba escondida en el codigo, y el resultado fue el previsible:
+        // un "failed to connect" sin que ni la persona ni yo pudieramos
+        // saber a que direccion estaba llamando en realidad. Un error de
+        // conexion que no dice a donde intentaba conectarse no es un
+        // mensaje de error, es una adivinanza.
+        raiz.addView(hueco(20))
+        raiz.addView(texto("SERVIDOR", 13f, Color.parseColor("#7E8AA0")))
+        campoServidor = EditText(this).apply {
+            setText(ajustes.servidor)
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setPadding(24, 20, 24, 20)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1C2434")); cornerRadius = 20f
+            }
+        }
+        raiz.addView(campoServidor)
+        raiz.addView(botonPequeno("🔌  Probar la conexión") { probarConexion() })
 
         raiz.addView(hueco(24))
         campoAsignatura = EditText(this).apply {
@@ -129,6 +151,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun alPulsarGrabar() {
         ajustes.ultimaAsignatura = campoAsignatura.text.toString()
+        guardarServidor()
         if (!grabando) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
@@ -225,6 +248,44 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 })
+            }
+        }
+    }
+
+    /**
+     * Dice si el servidor contesta, y si no, POR QUE no. Nada de "failed
+     * to connect" a secas: el mensaje tiene que decir a donde llamaba y
+     * que paso, o no sirve para arreglar nada.
+     */
+    /** Toma la direccion escrita en pantalla como la buena. */
+    private fun guardarServidor() {
+        val d = campoServidor.text.toString().trim().trimEnd('/')
+        if (d.isNotBlank()) {
+            ajustes.servidor = d
+            servidor = Servidor(ajustes.servidor)
+        }
+    }
+
+    private fun probarConexion() {
+        val direccion = campoServidor.text.toString().trim().trimEnd('/')
+        if (direccion.isBlank()) { avisar("Escriba una dirección primero"); return }
+        ajustes.servidor = direccion
+        servidor = Servidor(ajustes.servidor)
+
+        estado.text = "⏳ Probando $direccion …\n(si el servidor está dormido tarda hasta un minuto)"
+        estado.setTextColor(Color.parseColor("#FACC15"))
+
+        lifecycleScope.launch {
+            try {
+                val clases = servidor.listar()
+                estado.text = "✅ El servidor contesta.\n$direccion\n" +
+                              "Clases guardadas: ${clases.size}"
+                estado.setTextColor(Color.parseColor("#4ADE80"))
+                cargarLista()
+            } catch (e: Exception) {
+                estado.text = "❌ No contesta.\nDirección: $direccion\n" +
+                              "Motivo: ${e.javaClass.simpleName} — ${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
             }
         }
     }

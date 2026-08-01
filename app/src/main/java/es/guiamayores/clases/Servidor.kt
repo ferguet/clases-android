@@ -78,7 +78,11 @@ class Servidor(private val base: String) {
     suspend fun listar(): List<String> = withContext(Dispatchers.IO) {
         val peticion = Request.Builder().url("$base/clases/listar").get().build()
         cliente.newCall(peticion).execute().use { resp ->
-            if (!resp.isSuccessful) return@withContext emptyList()
+            // Antes esto devolvia lista vacia cuando fallaba, y era un
+            // error: "no hay clases" y "no he podido preguntar" son cosas
+            // distintas, y confundirlas deja a la persona mirando una
+            // lista vacia sin saber que en realidad no hay conexion.
+            if (!resp.isSuccessful) throw Exception(mensajeError(resp.code, resp.body?.string() ?: ""))
             val json = JSONObject(resp.body?.string() ?: "{}")
             val arr = json.optJSONArray("clases") ?: return@withContext emptyList()
             (0 until arr.length()).map { arr.getString(it) }
