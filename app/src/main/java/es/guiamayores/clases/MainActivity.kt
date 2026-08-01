@@ -46,6 +46,11 @@ class MainActivity : AppCompatActivity() {
     private var grabando = false
     private var cronometro: Chronometer? = null
 
+    /** Elegir un audio de cualquier app o carpeta del movil. */
+    private val elegirAudio = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri -> if (uri != null) transcribirDeFuera(uri) }
+
     private val pedirPermiso = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { concedido -> if (concedido) empezarGrabacion() else avisar("Sin permiso de micrófono no se puede grabar.") }
@@ -121,6 +126,22 @@ class MainActivity : AppCompatActivity() {
 
         botonGrabar = boton("🎙️  EMPEZAR A GRABAR", "#0B7A3B") { alPulsarGrabar() }
         raiz.addView(botonGrabar)
+
+        // TRAER UN AUDIO DE FUERA.
+        //
+        // No todas las clases se graban con esta app: puede venir de la
+        // grabadora del movil, de un audio que ha pasado un compañero, o
+        // de una grabadora aparte. Si solo se pudiera transcribir lo
+        // grabado aqui dentro, la app serviria de mucho menos justo el dia
+        // que no pudiste ir a clase -que es cuando mas falta hace-.
+        raiz.addView(boton("📂  TRAER UN AUDIO YA GRABADO", "#1D4ED8") {
+            guardarServidor()
+            try {
+                elegirAudio.launch("audio/*")
+            } catch (e: Exception) {
+                avisar("No se pudo abrir el explorador de archivos")
+            }
+        })
 
         raiz.addView(hueco(30))
         raiz.addView(texto("TRANSCRIPCIÓN", 13f, Color.parseColor("#7E8AA0")))
@@ -257,6 +278,74 @@ class MainActivity : AppCompatActivity() {
      * to connect" a secas: el mensaje tiene que decir a donde llamaba y
      * que paso, o no sirve para arreglar nada.
      */
+    /**
+     * Coge un audio elegido de otra app y lo manda a transcribir.
+     *
+     * Hay que copiarlo antes a una carpeta propia: el "uri" que devuelve
+     * el explorador de Android no es una ruta de fichero de verdad, sino
+     * un permiso temporal para leerlo, y OkHttp necesita un fichero real
+     * para subirlo.
+     */
+    private fun transcribirDeFuera(uri: android.net.Uri) {
+        estado.text = "📂 Preparando el audio…"
+        estado.setTextColor(Color.parseColor("#FACC15"))
+
+        lifecycleScope.launch {
+            var copia: java.io.File? = null
+            try {
+                val tipo = contentResolver.getType(uri) ?: "audio/mpeg"
+                val nombre = nombreDelFichero(uri)
+
+                copia = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val carpeta = java.io.File(cacheDir, "importados").apply { mkdirs() }
+                    val destino = java.io.File(carpeta, nombre)
+                    contentResolver.openInputStream(uri)?.use { entrada ->
+                        destino.outputStream().use { salida -> entrada.copyTo(salida) }
+                    } ?: throw Exception("No se pudo abrir el archivo elegido")
+                    destino
+                }
+
+                val mb = copia.length() / (1024.0 * 1024.0)
+                if (copia.length() > 25 * 1024 * 1024) {
+                    estado.text = "❌ Ese audio pesa %.1f MB y el límite son 25 MB.\n".format(mb) +
+                        "Hay que partirlo en trozos antes de traerlo."
+                    estado.setTextColor(Color.parseColor("#F87171"))
+                    copia.delete()
+                    return@launch
+                }
+
+                estado.text = "⏳ Transcribiendo %s (%.1f MB)…".format(nombre, mb)
+                estado.setTextColor(Color.parseColor("#FACC15"))
+
+                servidor = Servidor(ajustes.servidor)
+                val resultado = servidor.transcribir(copia, campoAsignatura.text.toString(), tipo)
+                textoResultado.text = resultado.texto
+                estado.text = "✅ Transcrito y guardado (${resultado.fichero})"
+                estado.setTextColor(Color.parseColor("#4ADE80"))
+                habilitarResumen(resultado.fichero)
+                cargarLista()
+            } catch (e: Exception) {
+                estado.text = "❌ ${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
+            } finally {
+                copia?.delete()
+            }
+        }
+    }
+
+    /** El nombre real del fichero elegido, para que el servidor lo reciba
+     *  con su extension correcta (mp3, wav, m4a...). */
+    private fun nombreDelFichero(uri: android.net.Uri): String {
+        var nombre: String? = null
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i >= 0 && c.moveToFirst()) nombre = c.getString(i)
+            }
+        } catch (e: Exception) {}
+        return (nombre ?: "audio_importado.mp3").replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
     /** Toma la direccion escrita en pantalla como la buena. */
     private fun guardarServidor() {
         val d = campoServidor.text.toString().trim().trimEnd('/')

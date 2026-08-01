@@ -38,12 +38,20 @@ class Servidor(private val base: String) {
 
     data class Resultado(val texto: String, val fichero: String)
 
-    suspend fun transcribir(audio: File, asignatura: String): Resultado = withContext(Dispatchers.IO) {
+    /**
+     * @param tipoMime el tipo real del fichero. Importa: un audio traido
+     *   de otra app puede ser mp3, wav, ogg... y si se manda todo como
+     *   "audio/mp4" el servicio de transcripcion puede rechazarlo por no
+     *   corresponder el contenido con lo declarado.
+     */
+    suspend fun transcribir(
+        audio: File, asignatura: String, tipoMime: String = "audio/mp4"
+    ): Resultado = withContext(Dispatchers.IO) {
         val cuerpo = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
                 "audio", audio.name,
-                audio.asRequestBody("audio/mp4".toMediaType())
+                audio.asRequestBody(tipoMime.toMediaType())
             )
             .addFormDataPart("asignatura", asignatura.ifBlank { "sin_asignatura" })
             .build()
