@@ -264,8 +264,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun cargarLista() {
         lifecycleScope.launch {
-            val clases = try { servidor.listar() } catch (e: Exception) { emptyList() }
+            // EL BOTON QUE NO HACIA NADA.
+            //
+            // Antes esto era `try { ... } catch { emptyList() }`: si fallaba
+            // la conexion, se tragaba el error y pintaba la misma lista de
+            // siempre. Desde fuera parecia un boton roto, cuando en realidad
+            // estaba avisando de algo importante -que no habia servidor- y
+            // nadie lo oia. Un fallo que no se ve es peor que un fallo.
             listaClases.removeAllViews()
+            val clases = try {
+                servidor.listar()
+            } catch (e: Exception) {
+                estado.text = "❌ No se pudo consultar la lista.\n${e.message}"
+                estado.setTextColor(Color.parseColor("#F87171"))
+                listaClases.addView(texto(
+                    "No se ha podido preguntar al servidor, así que no sé qué clases hay. " +
+                    "Pruebe el botón de probar la conexión.",
+                    14f, Color.parseColor("#F87171")
+                ))
+                return@launch
+            }
             if (clases.isEmpty()) {
                 listaClases.addView(texto("Todavía no hay clases guardadas.", 14f, Color.parseColor("#6C7689")))
                 return@launch
@@ -330,16 +348,17 @@ class MainActivity : AppCompatActivity() {
                     destino
                 }
 
+                // SIN TOPE DE TAMAÑO AQUI.
+                //
+                // Antes esta pantalla rechazaba todo lo que pasara de 25 MB.
+                // Tenia sentido cuando el servidor no sabia partir audios,
+                // pero desde que sabe, este tope solo servia para prohibir
+                // lo que el servidor ya podia hacer: la web funcionaba con
+                // clases grandes y el movil las rechazaba, por un limite que
+                // ya no existia en ningun sitio salvo aqui.
                 val mb = copia.length() / (1024.0 * 1024.0)
-                if (copia.length() > 25 * 1024 * 1024) {
-                    estado.text = "❌ Ese audio pesa %.1f MB y el límite son 25 MB.\n".format(mb) +
-                        "Hay que partirlo en trozos antes de traerlo."
-                    estado.setTextColor(Color.parseColor("#F87171"))
-                    copia.delete()
-                    return@launch
-                }
-
-                estado.text = "⏳ Transcribiendo %s (%.1f MB)…".format(nombre, mb)
+                estado.text = "⏳ Transcribiendo %s (%.1f MB)…\n".format(nombre, mb) +
+                    "Las clases largas se parten en trozos, así que puede tardar varios minutos."
                 estado.setTextColor(Color.parseColor("#FACC15"))
 
                 servidor = Servidor(ajustes.servidor)

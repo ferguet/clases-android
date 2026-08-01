@@ -32,8 +32,14 @@ class Servidor(private val base: String) {
         // fallar, porque parece un fallo de verdad y solo es el servidor
         // desperezandose-.
         .connectTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.MINUTES)
-        .readTimeout(5, TimeUnit.MINUTES)
+        // Subir una clase de dos horas por datos moviles puede llevar un
+        // buen rato, y el servidor ademas tiene que partirla y transcribir
+        // trozo por trozo antes de contestar. Rendirse a los 5 minutos
+        // dejaria tirada justo la clase larga, que es la que mas cuesta
+        // volver a grabar.
+        .writeTimeout(20, TimeUnit.MINUTES)
+        .readTimeout(20, TimeUnit.MINUTES)
+        .callTimeout(30, TimeUnit.MINUTES)
         .build()
 
     /** Lo que dijo el servidor la ultima vez sobre donde guarda las clases. */
