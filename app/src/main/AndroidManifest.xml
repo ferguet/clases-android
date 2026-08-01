@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Grabar el audio de la clase. Es el unico permiso delicado de toda
+         esta app, y solo se usa mientras la pantalla de grabar esta abierta:
+         nunca en segundo plano, nunca sin que la persona vea el boton de
+         grabando encendido. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Para mandar el audio al servidor de transcripcion. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+
+    <application
+        android:label="Clases"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:theme="@style/Theme.AppCompat.NoActionBar"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true">
+
+        <!-- usesCleartextTraffic="true": mientras el servidor viva en la
+             red local de casa (http://192.168...) sin HTTPS. Cuando el
+             servidor este en Render o detras de Cloudflare Tunnel con
+             HTTPS, esto se puede quitar. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>

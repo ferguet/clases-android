@@ -1,0 +1,56 @@
+# Compila el APK y lo publica en un enlace FIJO.
+#
+# La etiqueta "ultima" se borra y se rehace en cada compilacion, asi que
+# el enlace de descarga es SIEMPRE EL MISMO: se guarda en favoritos del
+# movil, se toca, y se instala. Ni ordenador, ni zip, ni cables.
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Compilar
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Renombrar
+        run: |
+          mkdir -p salida
+          cp app/build/outputs/apk/debug/*.apk salida/clases.apk
+
+      - name: Publicar en el enlace fijo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ultima --yes --cleanup-tag || true
+          sleep 3
+          gh release create ultima salida/clases.apk \
+            --title "Ultima version - $(date '+%d/%m %H:%M')" \
+            --notes "Compilado desde el commit ${GITHUB_SHA:0:7}. Toque el fichero .apk para instalar."
+
+      - name: Guardar copia
+        uses: actions/upload-artifact@v4
+        with:
+          name: clases-apk
+          path: salida/clases.apk
+          if-no-files-found: error
