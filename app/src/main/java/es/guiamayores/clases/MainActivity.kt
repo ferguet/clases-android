@@ -663,12 +663,18 @@ class MainActivity : AppCompatActivity() {
                 estado.setTextColor(Color.parseColor("#FACC15"))
 
                 val resultado = servidor.preguntas(base, copia)
-                val partes = StringBuilder(resultado.preguntas)
-                partes.append("\n\n---\nDE DÓNDE SALEN ESTAS PREGUNTAS: ").append(resultado.origen)
-                for (f in resultado.fuentes) partes.append("\n- ").append(f.titulo).append(": ").append(f.url)
-                for (linea in resultado.diario) partes.append("\n(").append(linea).append(")")
-                textoResultado.text = partes.toString()
-                estado.text = "✅ Preguntas listas (${resultado.fichero})"
+                // LA FUENTE DELANTE, DENTRO DEL TEXTO.
+                //
+                // Antes esto se montaba aqui a mano, pegando el origen AL
+                // FINAL de las preguntas. Dos problemas: quedaba despues de
+                // diez preguntas (habia que llegar al final para verlo), y
+                // dependia de que este codigo lo hiciera bien -no de que el
+                // servidor lo garantizara-. Ahora el servidor manda una
+                // "cabecera" ya lista, delante, y aqui solo se pega.
+                val cabecera = if (resultado.cabecera.isNotBlank()) resultado.cabecera + "\n\n" else ""
+                textoResultado.text = cabecera + resultado.preguntas
+                estado.text = "✅ Preguntas listas (${resultado.fichero})" +
+                    if (resultado.diario.isNotEmpty()) "\n" + resultado.diario.joinToString("\n") else ""
                 estado.setTextColor(Color.parseColor("#4ADE80"))
                 cargarLista()
             } catch (e: Exception) {

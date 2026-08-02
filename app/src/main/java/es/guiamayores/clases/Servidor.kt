@@ -214,8 +214,8 @@ class Servidor(private val base: String) {
     data class Fuente(val titulo: String, val url: String)
 
     data class Examen(
-        val preguntas: String, val fichero: String, val origen: String,
-        val fuentes: List<Fuente>, val diario: List<String>,
+        val preguntas: String, val cabecera: String, val fichero: String,
+        val origen: String, val fuentes: List<Fuente>, val diario: List<String>,
     )
 
     /**
@@ -262,6 +262,7 @@ class Servidor(private val base: String) {
 
             Examen(
                 preguntas = json.optString("preguntas", "(sin preguntas)"),
+                cabecera = json.optString("cabecera", ""),
                 fichero = json.optString("fichero", ""),
                 origen = json.optString("origen", ""),
                 fuentes = fuentes,
